@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nokos - Sewa Nomor Virtual untuk OTP</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+        body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 8px; font-size: 2rem; }
+        .subtitle { text-align: center; color: #94a3b8; margin-bottom: 30px; }
+        .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+        .product { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; cursor: pointer; transition: transform 0.2s; }
+        .product:hover { transform: translateY(-4px); border-color: #3b82f6; }
+        .product h3 { font-size: 1.25rem; margin-bottom: 8px; }
+        .price { font-size: 28px; font-weight: bold; color: #22c55e; margin: 15px 0; }
+        .price small { font-size: 14px; color: #94a3b8; }
+        button { background: #3b82f6; color: white; border: none; padding: 12px; border-radius: 10px; cursor: pointer; width: 100%; font-size: 16px; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        .cart { background: #1e293b; border-radius: 16px; padding: 20px; margin-top: 30px; border: 1px solid #334155; }
+        .cart h2 { margin-bottom: 15px; }
+        .cart-items { margin: 15px 0; border-top: 1px solid #334155; padding-top: 15px; }
+        .cart-item { display: flex; justify-content: space-between; margin: 8px 0; }
+        .total { font-size: 20px; font-weight: bold; text-align: right; margin: 15px 0; }
+        .checkout { background: #22c55e; width: auto; padding: 12px 30px; }
+        .checkout:hover { background: #16a34a; }
+        .loading { text-align: center; padding: 20px; color: #94a3b8; display: none; }
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: #1e293b; border-radius: 20px; padding: 24px; max-width: 500px; width: 90%;
+            border: 1px solid #334155;
+        }
+        .phone-number { font-size: 32px; text-align: center; font-family: monospace; margin: 20px 0; color: #22c55e; }
+        .otp-code { font-size: 48px; text-align: center; font-family: monospace; margin: 20px 0; color: #fbbf24; letter-spacing: 8px; }
+        .close { background: #ef4444; margin-top: 20px; }
+        .close:hover { background: #dc2626; }
+        .remove-item { background: #ef4444; padding: 4px 12px; width: auto; font-size: 12px; }
+        .remove-item:hover { background: #dc2626; }
+        .empty-cart { text-align: center; color: #94a3b8; padding: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📱 Nokos</h1>
+    <div class="subtitle">Nomor Kosong untuk Verifikasi OTP</div>
+    
+    <div class="products" id="products">
+        <div style="text-align:center;">Memuat layanan...</div>
+    </div>
+    
+    <div class="cart">
+        <h2>🛒 Pesanan Saya</h2>
+        <div class="cart-items" id="cart-items">
+            <div class="empty-cart">Belum ada pesanan</div>
+        </div>
+        <div class="total">Total: Rp <span id="total">0</span></div>
+        <button class="checkout" onclick="checkout()">💳 Bayar Sekarang</button>
+    </div>
+    
+    <div class="loading" id="loading">⏳ Memproses...</div>
+    <div id="payment-modal"></div>
+</div>
+
+<script>
+    let products = [];
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    
+    // Load produk dari RumahOTP
+    async function loadProducts() {
+        try {
+            const res = await fetch('/api/rumahotp-services');
+            const data = await res.json();
+            if (data.success) {
+                products = data.products;
+                renderProducts();
+            } else {
+                document.getElementById('products').innerHTML = '<div style="text-align:center; color:#ef4444;">Gagal memuat layanan. Periksa API Key RumahOTP.</div>';
+            }
+        } catch (error) {
+            console.error('Error loading products:', error);
+            document.getElementById('products').innerHTML = '<div style="text-align:center; color:#ef4444;">Error memuat layanan</div>';
+        }
+    }
+    
+    function renderProducts() {
+        const container = document.getElementById('products');
+        if (!products || products.length === 0) {
+            container.innerHTML = '<div style="text-align:center;">Tidak ada layanan tersedia</div>';
+            return;
+        }
+        container.innerHTML = products.map(p => `
+            <div class="product">
+                <h3>📱 ${p.name}</h3>
+                <div class="price">Rp ${p.price.toLocaleString()} <small>/nomor</small></div>
+                <button onclick="addToCart(${p.id}, '${p.name}', ${p.price})">+ Pesan Nomor</button>
+            </div>
+        `).join('');
+    }
+    
+    function addToCart(id, name, price) {
+        const existing = cart.find(item => item.id === id);
+        if (existing) {
+            existing.quantity++;
+        } else {
+            cart.push({ id, name, price, quantity: 1 });
+        }
+        localStorage.setItem('cart', JSON.stringify(cart));
+        renderCart();
+    }
+    
+    function removeFromCart(id) {
+        cart = cart.filter(item => item.id !== id);
+        localStorage.setItem('cart', JSON.stringify(cart));
+        renderCart();
+    }
+    
+    function renderCart() {
+        const container = document.getElementById('cart-items');
+        const totalElement = document.getElementById('total');
+        
+        if (!cart || cart.length === 0) {
+            container.innerHTML = '<div class="empty-cart">Belum ada pesanan</div>';
+            totalElement.innerText = '0';
+            return;
+        }
+        
+        container.innerHTML = cart.map(item => `
+            <div class="cart-item">
+                <span>${item.name} x${item.quantity}</span>
+                <div>
+                    <span style="margin-right: 16px;">Rp ${(item.price * item.quantity).toLocaleString()}</span>
+                    <button class="remove-item" onclick="removeFromCart(${item.id})">Hapus</button>
+                </div>
+            </div>
+        `).join('');
+        
+        const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        totalElement.innerText = total.toLocaleString();
+    }
+    
+    async function checkout() {
+        if (!cart || cart.length === 0) {
+            alert('Belum ada layanan yang dipesan!');
+            return;
+        }
+        
+        const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        document.getElementById('loading').style.display = 'block';
+        
+        try {
+            const paymentRes = await fetch('/api/create-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: total })
+            });
+            
+            const payment = await paymentRes.json();
+            
+            if (payment.success) {
+                showQRISModal(payment.qrImage, payment.depositId, total);
+            } else {
+                alert('Gagal membuat pembayaran: ' + (payment.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+    
+    function showQRISModal(qrImage, depositId, total) {
+        const modalDiv = document.getElementById('payment-modal');
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h3 style="text-align:center;">Scan QRIS untuk Bayar</h3>
+                <img src="${qrImage}" style="width:100%; max-width:250px; display:block; margin:20px auto;">
+                <p style="text-align:center;">Total: Rp ${total.toLocaleString()}</p>
+                <p style="text-align:center; color:#94a3b8;" id="payment-status">⏳ Menunggu pembayaran...</p>
+                <button id="close-modal" class="close">Tutup</button>
+            </div>
+        `;
+        modalDiv.innerHTML = '';
+        modalDiv.appendChild(modal);
+        
+        let intervalCount = 0;
+        const interval = setInterval(async () => {
+            intervalCount++;
+            try {
+                const statusRes = await fetch(`/api/payment-status?depositId=${depositId}`);
+                const status = await statusRes.json();
+                const statusEl = document.getElementById('payment-status');
+                
+                if (status.status === 'success') {
+                    statusEl.innerHTML = '✅ Pembayaran BERHASIL! Sedang memproses OTP...';
+                    statusEl.style.color = '#22c55e';
+                    clearInterval(interval);
+                    await createOTPOrders();
+                } else if (status.status === 'pending') {
+                    statusEl.innerHTML = '⏳ Menunggu pembayaran QRIS...';
+                } else if (status.status === 'already') {
+                    statusEl.innerHTML = '⚠️ Pembayaran sudah diproses sebelumnya.';
+                    clearInterval(interval);
+                }
+                
+                if (intervalCount > 60) {
+                    statusEl.innerHTML = '⏰ Waktu habis. Silakan cek status pesanan secara manual.';
+                    clearInterval(interval);
+                }
+            } catch (error) {
+                console.error('Status check error:', error);
+            }
+        }, 5000);
+        
+        document.getElementById('close-modal').onclick = () => {
+            clearInterval(interval);
+            modal.remove();
+        };
+    }
+    
+    async function createOTPOrders() {
+        const orderResults = [];
+        
+        for (const item of cart) {
+            try {
+                // Default values untuk Indonesia
+                const orderRes = await fetch('/api/create-otp-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        serviceId: item.id,
+                        countryId: 340437,
+                        providerId: 3837,
+                        operatorId: 1
+                    })
+                });
+                const order = await orderRes.json();
+                if (order.success) {
+                    orderResults.push(order);
+                    showOTPResult(order.phoneNumber, order.orderId, order.serviceName || item.name);
+                } else {
+                    console.error('Order failed:', order.error);
+                    showAlert('Gagal memesan nomor untuk ' + item.name);
+                }
+            } catch (error) {
+                console.error('Error creating order:', error);
+                showAlert('Error memesan nomor untuk ' + item.name);
+            }
+        }
+        
+        if (orderResults.length > 0) {
+            localStorage.removeItem('cart');
+            cart = [];
+            renderCart();
+        }
+    }
+    
+    function showOTPResult(phoneNumber, orderId, serviceName) {
+        const modalDiv = document.getElementById('payment-modal');
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h3 style="text-align:center;">📱 Nomor Siap Pakai - ${serviceName}</h3>
+                <div class="phone-number">${phoneNumber}</div>
+                <p style="text-align:center; color:#94a3b8;">Nomor aktif selama 20 menit</p>
+                <p style="text-align:center;"><small>Order ID: ${orderId}</small></p>
+                <button id="cek-otp-${orderId}" style="background:#3b82f6; margin-bottom:10px;">🔍 Cek Kode OTP</button>
+                <button id="close-modal" class="close">Tutup</button>
+            </div>
+        `;
+        modalDiv.appendChild(modal);
+        
+        document.getElementById(`cek-otp-${orderId}`).onclick = async () => {
+            try {
+                const statusRes = await fetch(`/api/check-otp-code?orderId=${orderId}`);
+                const status = await statusRes.json();
+                if (status.success && status.otpCode) {
+                    alert(`📨 Kode OTP: ${status.otpCode}\n\n📝 Pesan lengkap:\n${status.otpMessage || '-'}`);
+                } else if (status.status === 'received') {
+                    alert('⏳ Nomor sudah dipesan, menunggu kode OTP masuk...');
+                } else if (status.status === 'completed') {
+                    alert('✅ Kode OTP sudah diterima sebelumnya.\nCek riwayat pesanan kamu.');
+                } else if (status.status === 'canceled') {
+                    alert('❌ Pesanan dibatalkan.');
+                } else {
+                    alert('Belum ada kode OTP masuk. Silakan coba lagi dalam 30 detik.');
+                }
+            } catch (error) {
+                alert('Error cek OTP: ' + error.message);
+            }
+        };
+        
+        document.getElementById('close-modal').onclick = () => modal.remove();
+    }
+    
+    function showAlert(message) {
+        const modalDiv = document.getElementById('payment-modal');
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h3 style="text-align:center;">⚠️ Informasi</h3>
+                <p style="text-align:center; margin:20px 0;">${message}</p>
+                <button id="close-alert" class="close">OK</button>
+            </div>
+        `;
+        modalDiv.innerHTML = '';
+        modalDiv.appendChild(modal);
+        document.getElementById('close-alert').onclick = () => modal.remove();
+    }
+    
+    loadProducts();
+    renderCart();
+</script>
+</body>
+</html>
